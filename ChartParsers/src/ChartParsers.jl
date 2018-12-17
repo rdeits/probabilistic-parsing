@@ -1,4 +1,6 @@
-module Charts
+module ChartParsers
+
+export Chart, parse, Grammar, expand, complete_parses
 
 # include("FixedCapacityVectors.jl")
 # using .FixedCapacityVectors
@@ -17,6 +19,7 @@ end
 rule(arc::Arc) = arc.rule
 head(arc::Arc) = lhs(rule(arc))
 completions(arc::Arc) = length(arc.constituents)
+constituents(arc::Arc) = arc.constituents
 isactive(arc::Arc) = completions(arc) < length(rhs(rule(arc)))
 function next_needed(arc::Arc)
     @assert isactive(arc)
@@ -51,13 +54,60 @@ function Base.:(==)(a1::Arc, a2::Arc)
     true
 end
 
+function Base.:*(a1::Arc, a2::Arc)
+    @assert isactive(a1) && !isactive(a2)
+    @assert next_needed(a1) == head(a2)
+    Arc(a1.start, a2.stop, a1.rule, vcat(a1.constituents, a2))
+end
+
+function Base.:+(a1::Arc, a2::Arc)
+    if isactive(a1) && !isactive(a2)
+        a1 * a2
+    elseif !isactive(a1) && isactive(a2)
+        a2 * a1
+    else
+        throw(ArgumentError("Can only combine an active and an inactive edge"))
+    end
+end
+
+expand(arc::Arc) = expand(stdout, arc)
+
+function expand(io::IO, arc::Arc, indentation=0)
+    # print(io, repeat(" ", indentation))
+    print(io, "(", head(arc))
+    arguments = rhs(rule(arc))
+    for i in eachindex(arguments)
+        if length(arguments) > 1
+            print(io, "\n", repeat(" ", indentation + 2))
+        else
+            print(io, " ")
+        end
+        if i > completions(arc)
+            print(io, "(", arguments[i], ")")
+        else
+            constituent = constituents(arc)[i]
+            if constituent isa String
+                print(io, "\"$constituent\"")
+            else
+                expand(io, constituent, indentation + 2)
+            end
+        end
+    end
+    print(io, ")")
+end
+
+
 struct Chart
+    num_tokens::Int
     active::Dict{Symbol, Vector{Set{Arc}}} # organized by next needed constituent then by stop
     inactive::Dict{Symbol, Vector{Set{Arc}}} # organized by head then by start
 end
 
-Chart() = Chart(Dict{Symbol, Vector{Set{Arc}}}(),
-                Dict{Symbol, Vector{Set{Arc}}}())
+num_tokens(chart::Chart) = chart.num_tokens
+
+Chart(num_tokens) = Chart(num_tokens,
+                          Dict{Symbol, Vector{Set{Arc}}}(),
+                          Dict{Symbol, Vector{Set{Arc}}}())
 
 function storage(chart::Chart, active::Bool, symbol::Symbol, node::Integer)
     if active
@@ -66,10 +116,7 @@ function storage(chart::Chart, active::Bool, symbol::Symbol, node::Integer)
         d = chart.inactive
     end
     v = get!(d, symbol) do
-        Vector{Set{Arc}}()
-    end
-    for _ in length(v):node
-        push!(v, Set{Arc}())
+        [Set{Arc}() for _ in 0:num_tokens(chart)]
     end
     v[node + 1]
 end
@@ -107,41 +154,31 @@ function Base.in(arc::Arc, chart::Chart)
     arc ∈ storage(chart, arc)
 end
 
-function Base.:*(a1::Arc, a2::Arc)
-    @assert isactive(a1) && !isactive(a2)
-    @assert next_needed(a1) == head(a2)
-    Arc(a1.start, a2.stop, a1.rule, vcat(a1.constituents, a2))
+complete_parses(chart::Chart) = filter(storage(chart, false, :S, 0)) do arc
+    arc.stop == num_tokens(chart)
 end
 
-function Base.:+(a1::Arc, a2::Arc)
-    if isactive(a1) && !isactive(a2)
-        a1 * a2
-    elseif !isactive(a1) && isactive(a2)
-        a2 * a1
-    else
-        throw(ArgumentError("Can only combine an active and an inactive edge"))
-    end
+struct Grammar
+    productions::Vector{Rule}
+    words::Dict{String, Vector{Symbol}}
 end
 
-function parse()
-    grammar = [
-        :S => [:NP, :VP, :PP],
-        :S => [:NP, :VP],
-        :NP => [:PN],
-        :VP => [:IV],
-        :PP => [:P, :NP],
-    ]
 
-    # step 1
+function initial_agenda(tokens, grammar)
     agenda = Arc[]
 
-    push!(agenda, Arc(0, 1, :PN => [:W], ["mia"]))
-    push!(agenda, Arc(1, 2, :IV => [:W], ["danced"]))
-    parse(agenda, grammar)
+    for (i, token) in enumerate(tokens)
+        for head in grammar.words[token]
+            push!(agenda, Arc(i - 1, i, head => [Symbol("#token")], [string(token)]))
+        end
+    end
+    agenda
 end
 
-function parse(agenda, grammar)
-    chart = Chart()
+function parse(tokens, grammar)
+    chart = Chart(length(tokens))
+    agenda = initial_agenda(tokens, grammar)
+
     while !isempty(agenda)
         candidate = popfirst!(agenda)
         push!(chart, candidate)
@@ -153,7 +190,7 @@ function parse(agenda, grammar)
             end
         end
         if !isactive(candidate)
-            for rule in grammar
+            for rule in grammar.productions
                 if first(rhs(rule)) == head(candidate)
                     hypothesis = Arc(candidate.start,
                                      candidate.start,
@@ -165,7 +202,7 @@ function parse(agenda, grammar)
                 end
             end
         end
-        @show agenda
+        # @show agenda
     end
     chart
 end

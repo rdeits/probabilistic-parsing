@@ -1,4 +1,4 @@
-[[Charts]]
-path = "Charts"
+[[ChartParsers]]
+path = "ChartParsers"
 uuid = "de988000-0167-11e9-3115-2b7bbce15f76"
-version = "0.1.0"
+version = "0.0.1"
