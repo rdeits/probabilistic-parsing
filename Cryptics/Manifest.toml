@@ -1,22 +1,11 @@
 [[Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 
-[[ChartParsers]]
-path = "ChartParsers"
-uuid = "de988000-0167-11e9-3115-2b7bbce15f76"
-version = "0.0.1"
-
 [[Combinatorics]]
 deps = ["LinearAlgebra", "Polynomials", "Test"]
 git-tree-sha1 = "50b3ae4d643dc27eaff69fb6be06ee094d5500c9"
 uuid = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
 version = "0.7.0"
-
-[[Cryptics]]
-deps = ["Combinatorics"]
-path = "Cryptics"
-uuid = "0fbdecee-01fc-11e9-134a-45d008bceca4"
-version = "0.1.0"
 
 [[Distributed]]
 deps = ["LinearAlgebra", "Random", "Serialization", "Sockets"]

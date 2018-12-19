@@ -1,6 +1,7 @@
 module Cryptics
 
-using Base.Iterators: product
+using Base.Iterators: product, drop
+using Combinatorics: permutations
 
 export Chart, parse, Grammar, expand, complete_parses
 
@@ -39,50 +40,44 @@ rhs(r::Rule) = last(r)
 
 function cryptics_rules()
     Rule[
-        # Synonym() => (Token(),),
         AnagramIndicator() => (Token(),),
         Anagram() => (AnagramIndicator(), Token()),
         Anagram() => (Token(), AnagramIndicator()),
         Clue() => (Wordplay(), Definition()),
+        Clue() => (Definition(), Wordplay()),
         Definition() => (Token(),),
         Wordplay() => (Anagram(),),
     ]
 end
 
-# function apply(::Synonym, ::Tuple{Token}, args)
-#     ["hello", "greetings"]
-# end
-
-# function apply(::Wordplay, ::Tuple{Synonym}, args)
-#     [first(args)]
-# end
-
-function apply(::AnagramIndicator, ::Tuple{Token}, (word,))
-    [word]
+function apply!(output::Vector{String}, ::AnagramIndicator, ::Tuple{Token}, (word,))
+    push!(output, word)
 end
 
-function apply(::Anagram, ::Tuple{AnagramIndicator, Token}, (indicator, word))
-    all_anagrams(word)
+function apply!(output::Vector{String}, ::Anagram, ::Tuple{AnagramIndicator, Token}, (indicator, word))
+    for perm in drop(permutations(collect(word)), 1)
+        push!(output, join(perm))
+    end
 end
 
-function apply(::Anagram, ::Tuple{Token, AnagramIndicator}, (word, indicator))
-    all_anagrams(word)
+function apply!(output::Vector{String}, ::Anagram, ::Tuple{Token, AnagramIndicator}, (word, indicator))
+    apply!(output, Anagram(), (AnagramIndicator(), Token()), (indicator, word))
 end
 
-function apply(::Wordplay, ::Tuple{Anagram}, (word,))
-    [word]
+function apply!(output::Vector{String}, ::Wordplay, ::Tuple{Anagram}, (word,))
+    push!(output, word)
 end
 
-function all_anagrams(word)
-    [word, reverse(word)]
+function apply!(output::Vector{String}, ::Clue, ::Tuple{Wordplay, Definition}, (wordplay, definition))
+    push!(output, "$wordplay means $definition")
 end
 
-function apply(::Clue, ::Tuple{Wordplay, Definition}, (wordplay, definition))
-    ["$wordplay means $definition"]
+function apply!(output::Vector{String}, ::Clue, ::Tuple{Definition, Wordplay}, (definition, wordplay))
+    push!(output, "$wordplay means $definition")
 end
 
-function apply(::Definition, ::Tuple{Token}, (def,))
-    [def]
+function apply!(output::Vector{String}, ::Definition, ::Tuple{Token}, (def,))
+    push!(output, def)
 end
 
 struct Arc
@@ -93,27 +88,26 @@ struct Arc
     outputs::Vector{String}
 end
 
-function _apply(N)
+
+@generated function _apply!(output::Vector{String}, head::GrammaticalSymbol,
+                            args::Tuple{Vararg{GrammaticalSymbol, N}},
+                            constituents::Vector{Arc}) where {N}
     quote
-        result = Vector{String}()
         for inputs in product($([:(outputs(constituents[$i])) for i in 1:N]...))
-            append!(result, apply(head, args, $(Expr(:tuple, [:(inputs[$i]) for i in 1:N]...))))
+            apply!(output, head, args, $(Expr(:tuple, [:(inputs[$i]) for i in 1:N]...)))
         end
-        result
+        nothing
     end
 end
 
-
-@generated function _apply(head::GrammaticalSymbol, args::Tuple{Vararg{GrammaticalSymbol, N}}, constituents::Vector{Arc}) where {N}
-    _apply(N)
+function _apply!(outputs::Vector{String},
+                rule::Rule,
+                constituents::Vector{Arc})
+    _apply!(outputs, first(rule), last(rule), constituents)
 end
 
-# function apply(arc::Arc)
-#     apply(first(arc.rule), last(arc.rule), arc.constituents)::Vector{String}
-# end
-
-function apply(rule::Rule, constituents::Vector{Arc})::Vector{String}
-    _apply(first(rule), last(rule), constituents)
+function solve!(arc)
+    _apply!(arc.outputs, arc.rule, arc.constituents)::Nothing
 end
 
 rule(arc::Arc) = arc.rule
@@ -158,14 +152,14 @@ end
 function Base.:*(a1::Arc, a2::Arc)
     @assert isactive(a1) && !isactive(a2)
     @assert next_needed(a1) == head(a2)
-    constituents = vcat(a1.constituents, a2)
-    if completions(a1) == length(rhs(rule(a1))) - 1
-        # resulting arc will be inactive
-        output = apply(a1.rule, constituents)
-    else
-        output = String[]
+
+    result = Arc(a1.start, a2.stop, a1.rule,
+                 vcat(a1.constituents, a2),
+                 String[])
+    if !isactive(result)
+        solve!(result)
     end
-    Arc(a1.start, a2.stop, a1.rule, constituents, output)
+    result
 end
 
 function Base.:+(a1::Arc, a2::Arc)
