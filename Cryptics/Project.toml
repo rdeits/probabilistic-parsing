@@ -1,0 +1,12 @@
+authors = ["Robin Deits <robin.deits@gmail.com>"]
+name = "Cryptics"
+uuid = "0fbdecee-01fc-11e9-134a-45d008bceca4"
+version = "0.1.0"
+
+[deps]
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

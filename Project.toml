@@ -1,2 +1,3 @@
 [deps]
 ChartParsers = "de988000-0167-11e9-3115-2b7bbce15f76"
+Cryptics = "0fbdecee-01fc-11e9-134a-45d008bceca4"

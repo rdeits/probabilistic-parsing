@@ -2,3 +2,8 @@
 path = "ChartParsers"
 uuid = "de988000-0167-11e9-3115-2b7bbce15f76"
 version = "0.0.1"
+
+[[Cryptics]]
+path = "Cryptics"
+uuid = "0fbdecee-01fc-11e9-134a-45d008bceca4"
+version = "0.1.0"
