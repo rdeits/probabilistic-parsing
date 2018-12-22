@@ -1,0 +1,71 @@
+module Synonyms
+
+export SYNONYMS
+
+function parse_heading(line)
+    parts = split(line, '|')
+    length(parts) == 2 || @show line parts
+    word = parts[1]
+    num_entries = parse(Int, parts[2])
+    word, num_entries
+end
+
+function parse_entry(line)
+    normalize.(split(line, '|')[2:end])
+end
+
+function add_synonyms!(synonyms, word, list)
+    entries = get!(() -> Set{String}(), synonyms, word)
+    for entry in list
+        push!(entries, entry)
+    end
+end
+
+function normalize(word)
+    replace(lowercase(word), r"[^a-z0-9]" => "")
+end
+
+function parse_synonyms(fname)
+    synonyms = Dict{String, Set{String}}()
+    open(fname) do file
+        @assert readline(file) == "ISO8859-1"
+        while true
+            line = readline(file)
+            if isempty(line)
+                break
+            end
+            word, num_entries = parse_heading(line)
+            for i in 1:num_entries
+                add_synonyms!(synonyms, word, parse_entry(readline(file)))
+            end
+        end
+    end
+    synonyms
+end
+
+function make_symmetric!(synonyms)
+    for (word, entries) in synonyms
+        for entry in entries
+            push!(get!(() -> Set{String}(), synonyms, entry), word)
+        end
+    end
+end
+
+function remove_loops!(synonyms)
+    for (word, entries) in synonyms
+        if word in entries
+            delete!(entries, word)
+        end
+    end
+end
+
+function load_synonyms()
+    synonyms = parse_synonyms(joinpath(@__DIR__, "..", "..", "corpora", "OpenOffice", "MyThes-1.0", "th_en_US_new.dat"))
+    make_symmetric!(synonyms)
+    remove_loops!(synonyms)
+    synonyms
+end
+
+const SYNONYMS = load_synonyms()
+
+end
