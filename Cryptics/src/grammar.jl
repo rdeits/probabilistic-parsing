@@ -5,13 +5,11 @@ struct Token <: GrammaticalSymbol end
 struct Wordplay <: GrammaticalSymbol end
 struct Clue <: GrammaticalSymbol end
 struct Definition <: GrammaticalSymbol end
-struct Anagram <: GrammaticalSymbol end
 struct AnagramIndicator <: GrammaticalSymbol end
-struct Reverse <: GrammaticalSymbol end
 struct ReverseIndicator <: GrammaticalSymbol end
-struct InsertIndicator <: GrammaticalSymbol end
-struct InsertAB <: GrammaticalSymbol end
-struct InsertBA <: GrammaticalSymbol end
+struct InsertABIndicator <: GrammaticalSymbol end
+struct InsertBAIndicator <: GrammaticalSymbol end
+struct HeadIndicator <: GrammaticalSymbol end
 
 const Rule = Pair{<:GrammaticalSymbol, <:Tuple{Vararg{GrammaticalSymbol}}}
 lhs(r::Rule) = first(r)
@@ -27,25 +25,24 @@ function cryptics_rules()
     Rule[
         Token() => (Token(), Token()),
         AnagramIndicator() => (Token(),),
-        Anagram() => (AnagramIndicator(), Token()),
-        Anagram() => (Token(), AnagramIndicator()),
+        Wordplay() => (AnagramIndicator(), Token()),
+        Wordplay() => (Token(), AnagramIndicator()),
         ReverseIndicator() => (Token(),),
-        Reverse() => (ReverseIndicator(), Token()),
-        Reverse() => (Token(), ReverseIndicator()),
-        # InsertIndicator() => (Token(),),
-        # InsertAB() => (InsertIndicator(), Wordplay(), Wordplay()),
-        # InsertAB() => (Wordplay(), InsertIndicator(), Wordplay()),
-        # InsertAB() => (Wordplay(), Wordplay(), InsertIndicator()),
-        # InsertBA() => (InsertIndicator(), Wordplay(), Wordplay()),
-        # InsertBA() => (Wordplay(), InsertIndicator(), Wordplay()),
-        # InsertBA() => (Wordplay(), Wordplay(), InsertIndicator()),
-        # Wordplay() => (InsertAB(),),
-        # Wordplay() => (InsertBA(),),
+        Wordplay() => (ReverseIndicator(), Token()),
+        Wordplay() => (Token(), ReverseIndicator()),
+        InsertABIndicator() => (Token(),),
+        HeadIndicator() => (Token(),),
+        Wordplay() => (InsertABIndicator(), Wordplay(), Wordplay()),
+        Wordplay() => (Wordplay(), InsertABIndicator(), Wordplay()),
+        Wordplay() => (Wordplay(), Wordplay(), InsertABIndicator()),
+        Wordplay() => (InsertBAIndicator(), Wordplay(), Wordplay()),
+        Wordplay() => (Wordplay(), InsertBAIndicator(), Wordplay()),
+        Wordplay() => (Wordplay(), Wordplay(), InsertBAIndicator()),
         Wordplay() => (Token(),),
-        Wordplay() => (Anagram(),),
-        Wordplay() => (Reverse(),),
         Wordplay() => (Synonym(),),
-        # Wordplay() => (Wordplay(), Wordplay()),
+        Wordplay() => (Wordplay(), Wordplay()),
+        Wordplay() => (HeadIndicator(), Token()),
+        Wordplay() => (Token(), HeadIndicator()),
         Synonym() => (Token(),),
         Definition() => (Token(),),
         Clue() => (Wordplay(), Definition()),
@@ -56,28 +53,20 @@ end
 apply(::Token, ::Tuple{Token, Token}, (a, b)) = [string(a, " ", b)]
 
 apply(::AnagramIndicator, ::Tuple{Token}, (word,)) = [word]
+apply(::HeadIndicator, ::Tuple{Token}, (word,)) = [word]
 
 function is_anagram(w1::AbstractString, w2::AbstractString)
     sort(collect(replace(w1, " " => ""))) == sort(collect(replace(w2, " " => "")))
 end
 
-function apply(::Anagram, ::Tuple{AnagramIndicator, Token}, (indicator, word))
+function apply(::Wordplay, ::Tuple{AnagramIndicator, Token}, (indicator, word))
     [candidate for candidate in keys(SYNONYMS) if word != candidate && is_anagram(word, candidate)]
-    # result = String[]
-    # for perm in drop(permutations(collect(replace(word, " " => ""))), 1)
-    #     @show perm
-    #     candidate = join(perm)
-    #     if candidate in keys(SYNONYMS)
-    #         push!(result, candidate)
-    #     end
-    # end
-    # result
 end
-@apply_by_reversing Anagram Token AnagramIndicator
+@apply_by_reversing Wordplay Token AnagramIndicator
 
 apply(::ReverseIndicator, ::Tuple{Token}, (word,)) = [word]
-apply(::Reverse, ::Tuple{ReverseIndicator, Token}, (indicator, word)) = [reverse(replace(word, " " => ""))]
-@apply_by_reversing Reverse Token ReverseIndicator
+apply(::Wordplay, ::Tuple{ReverseIndicator, Token}, (indicator, word)) = [reverse(replace(word, " " => ""))]
+@apply_by_reversing Wordplay Token ReverseIndicator
 
 """
 All insertions of a into b
@@ -89,20 +78,21 @@ function insertions(a, b)
 end
 # insertions(a, b) = ["insertions of $a into $b"]
 
-apply(::InsertIndicator, ::Tuple{Token}, (word,)) = [word]
-apply(::InsertAB, ::Tuple{InsertIndicator, Wordplay, Wordplay}, (indicator, a, b)) = insertions(a, b)
-apply(::InsertAB, ::Tuple{Wordplay, InsertIndicator, Wordplay}, (a, indicator, b)) = insertions(a, b)
-apply(::InsertAB, ::Tuple{Wordplay, Wordplay, InsertIndicator}, (a, b, indicator)) = insertions(a, b)
-apply(::InsertBA, ::Tuple{InsertIndicator, Wordplay, Wordplay}, (indicator, b, a)) = insertions(a, b)
-apply(::InsertBA, ::Tuple{Wordplay, InsertIndicator, Wordplay}, (b, indicator, a)) = insertions(a, b)
-apply(::InsertBA, ::Tuple{Wordplay, Wordplay, InsertIndicator}, (b, a, indicator)) = insertions(a, b)
+apply(::InsertABIndicator, ::Tuple{Token}, (word,)) = [word]
+apply(::InsertBAIndicator, ::Tuple{Token}, (word,)) = [word]
+apply(::Wordplay, ::Tuple{InsertABIndicator, Wordplay, Wordplay}, (indicator, a, b)) = insertions(a, b)
+apply(::Wordplay, ::Tuple{Wordplay, InsertABIndicator, Wordplay}, (a, indicator, b)) = insertions(a, b)
+apply(::Wordplay, ::Tuple{Wordplay, Wordplay, InsertABIndicator}, (a, b, indicator)) = insertions(a, b)
+apply(::Wordplay, ::Tuple{InsertBAIndicator, Wordplay, Wordplay}, (indicator, b, a)) = insertions(a, b)
+apply(::Wordplay, ::Tuple{Wordplay, InsertBAIndicator, Wordplay}, (b, indicator, a)) = insertions(a, b)
+apply(::Wordplay, ::Tuple{Wordplay, Wordplay, InsertBAIndicator}, (b, a, indicator)) = insertions(a, b)
 
-apply(::Wordplay, ::Tuple{Anagram}, (word,)) = [word]
-apply(::Wordplay, ::Tuple{Reverse}, (word,)) = [word]
 apply(::Wordplay, ::Tuple{Synonym}, (word,)) = [word]
 apply(::Wordplay, ::Tuple{Token}, (word,)) = [word]
-
 apply(::Wordplay, ::Tuple{Wordplay, Wordplay}, (a, b)) = [string(a, b)]
+
+apply(::Wordplay, ::Tuple{HeadIndicator, Token}, (indicator, word)) = [string(word[1])]
+@apply_by_reversing Wordplay Token HeadIndicator
 
 apply(::Clue, ::Tuple{Wordplay, Definition}, (wordplay, definition)) = ["\"$wordplay\" means \"$definition\""]
 

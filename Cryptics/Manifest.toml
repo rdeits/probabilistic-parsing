@@ -29,6 +29,12 @@ uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
 deps = ["Base64"]
 uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
 
+[[OrderedCollections]]
+deps = ["Random", "Serialization", "Test"]
+git-tree-sha1 = "85619a3f3e17bb4761fe1b1fd47f0e979f964d5b"
+uuid = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+version = "1.0.2"
+
 [[Polynomials]]
 deps = ["LinearAlgebra", "SparseArrays", "Test"]
 git-tree-sha1 = "1a1eae52956658a6acae6fa1b6d6c3d488192895"

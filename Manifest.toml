@@ -13,7 +13,7 @@ uuid = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
 version = "0.7.0"
 
 [[Cryptics]]
-deps = ["Combinatorics"]
+deps = ["Combinatorics", "OrderedCollections"]
 path = "Cryptics"
 uuid = "0fbdecee-01fc-11e9-134a-45d008bceca4"
 version = "0.1.0"
@@ -39,6 +39,12 @@ uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
 [[Markdown]]
 deps = ["Base64"]
 uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
+
+[[OrderedCollections]]
+deps = ["Random", "Serialization", "Test"]
+git-tree-sha1 = "85619a3f3e17bb4761fe1b1fd47f0e979f964d5b"
+uuid = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+version = "1.0.2"
 
 [[Polynomials]]
 deps = ["LinearAlgebra", "SparseArrays", "Test"]

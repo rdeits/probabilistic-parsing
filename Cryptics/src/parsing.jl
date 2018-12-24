@@ -12,7 +12,7 @@ struct Arc
     Arc(start::Integer, stop::Integer, rule::Rule, constituents=Arc[], output="") = new(start, stop, rule, constituents, output)
 end
 
-const Agenda = Vector{Arc}
+const Agenda = OrderedSet{Arc}
 
 @generated function _apply(head::GrammaticalSymbol,
                            args::Tuple{Vararg{GrammaticalSymbol, N}},
@@ -199,7 +199,7 @@ end
 
 
 function initial_agenda(tokens, grammar, ::BottomUp)
-    agenda = Arc[]
+    agenda = Agenda()
 
     for (i, token) in enumerate(tokens)
         push!(agenda, Arc(i - 1, i, Token() => (), [], String(token)))
@@ -216,7 +216,7 @@ function initial_chart(tokens, grammar, ::TopDown)
 end
 
 function initial_agenda(tokens, grammar, ::TopDown)
-    agenda = Arc[]
+    agenda = Agenda()
     for rule in grammar.productions
         if lhs(rule) == Clue()  # TODO get start symbol from grammar
             push!(agenda, Arc(0, 0, rule))
@@ -225,16 +225,12 @@ function initial_agenda(tokens, grammar, ::TopDown)
     agenda
 end
 
-
-const Agenda = Vector{Arc}
-
 function parse(tokens, grammar, strategy::AbstractStrategy)
-    @assert length(tokens) == 3 "need to generalize combinations"
     chart = initial_chart(tokens, grammar, strategy)
     agenda = initial_agenda(tokens, grammar, strategy)
 
     while !isempty(agenda)
-        candidate = popfirst!(agenda)
+        candidate = pop!(agenda)
         @show candidate
         update!(chart, agenda, candidate, grammar, strategy)
         # readline(stdin) == "q" && break
@@ -250,7 +246,7 @@ function update!(chart::Chart, agenda::Agenda, candidate::Arc, grammar::Grammar,
         for combined in combinations(candidate, mate)
             @show combined
             if combined ∉ chart
-                pushfirst!(agenda, combined)
+                push!(agenda, combined)
             end
         end
         println("done")
@@ -267,7 +263,7 @@ function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar
                                  candidate.start,
                                  rule)
                 if hypothesis ∉ chart
-                    pushfirst!(agenda, hypothesis)
+                    push!(agenda, hypothesis)
                 end
             end
         end
@@ -281,10 +277,25 @@ function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar
                 hypothesis = Arc(candidate.stop, candidate.stop, rule)
                 @show hypothesis
                 if hypothesis ∉ chart
-                    pushfirst!(agenda, hypothesis)
+                    push!(agenda, hypothesis)
                 end
             end
         end
     end
 end
+
+function solution_quality(arc::Arc)
+    @assert head(arc) === Clue() && length(constituents(arc)) == 2
+    w1, w2 = output.(constituents(arc))
+    if w2 in keys(SYNONYMS) && w1 in SYNONYMS[w2]
+        1.0
+    else
+        0.0
+    end
+end
+
+function solutions(chart::Chart)
+    [p for p in complete_parses(chart) if solution_quality(p) == 1.0]
+end
+
 
