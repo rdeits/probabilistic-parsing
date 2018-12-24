@@ -1,41 +1,42 @@
+abstract type AbstractStrategy end
+struct BottomUp <: AbstractStrategy end
+struct TopDown <: AbstractStrategy end
+
 struct Arc
     start::Int
     stop::Int
     rule::Rule
     constituents::Vector{Arc}
-    outputs::Vector{String}
+    output::String
+
+    Arc(start::Integer, stop::Integer, rule::Rule, constituents=Arc[], output="") = new(start, stop, rule, constituents, output)
 end
 
-@generated function _apply!(output::Vector{String}, head::GrammaticalSymbol,
-                            args::Tuple{Vararg{GrammaticalSymbol, N}},
-                            constituents::Vector{Arc}) where {N}
+const Agenda = Vector{Arc}
+
+@generated function _apply(head::GrammaticalSymbol,
+                           args::Tuple{Vararg{GrammaticalSymbol, N}},
+                           constituents::Vector{Arc}) where {N}
     quote
-        for inputs in product($([:(outputs(constituents[$i])) for i in 1:N]...))
-            apply!(output, head, args, $(Expr(:tuple, [:(inputs[$i]) for i in 1:N]...)))
-        end
-        nothing
+        apply(head, args, $(Expr(:tuple, [:(constituents[$i].output) for i in 1:N]...)))
     end
 end
 
-function _apply!(outputs::Vector{String},
-                rule::Rule,
+function apply(rule::Rule,
                 constituents::Vector{Arc})
-    _apply!(outputs, first(rule), last(rule), constituents)
-end
-
-function solve!(arc)
-    _apply!(arc.outputs, arc.rule, arc.constituents)::Nothing
+    _apply(first(rule), last(rule), constituents)
 end
 
 rule(arc::Arc) = arc.rule
 head(arc::Arc) = lhs(rule(arc))
-completions(arc::Arc) = length(arc.constituents)
+num_arguments(arc::Arc)::Int = length(rhs(rule(arc)))
+num_completions(arc::Arc) = length(arc.constituents)
+isactive(arc::Arc) = num_completions(arc) < num_arguments(arc)
 constituents(arc::Arc) = arc.constituents
-outputs(arc::Arc) = arc.outputs
-isactive(arc::Arc) = completions(arc) < length(rhs(rule(arc)))
+output(arc::Arc) = arc.output
 function next_needed(arc::Arc)
     @assert isactive(arc)
-    rhs(rule(arc))[completions(arc) + 1]
+    rhs(rule(arc))[num_completions(arc) + 1]
 end
 
 function Base.hash(arc::Arc, h::UInt)
@@ -59,17 +60,30 @@ function Base.:(==)(a1::Arc, a2::Arc)
     true
 end
 
-function Base.:*(a1::Arc, a2::Arc)
+function _combine(a1::Arc, a2::Arc, output::String)
     @assert isactive(a1) && !isactive(a2)
     @assert next_needed(a1) == head(a2)
+    Arc(a1.start, a2.stop, a1.rule, vcat(a1.constituents, a2), output)
+end
 
-    result = Arc(a1.start, a2.stop, a1.rule,
-                 vcat(a1.constituents, a2),
-                 String[])
-    if !isactive(result)
-        solve!(result)
+function combinations(a1::Arc, a2::Arc)::Vector{Arc}
+    if !isactive(a1) && isactive(a2)
+        return combinations(a2, a1)
+    elseif isactive(a1) && !isactive(a2)
+        new_constituents = vcat(a1.constituents, a2)
+        if num_completions(a1) + 1 == num_arguments(a1)
+            # then the combined arc will be complete, so we should solve it
+            result = Arc[]
+            for output in apply(a1.rule, new_constituents)
+                combined = _combine(a1, a2, output)
+                println(combined)
+                push!(result, combined)
+            end
+        else
+            result = [_combine(a1, a2, "")]
+        end
     end
-    result
+    return result
 end
 
 function Base.:+(a1::Arc, a2::Arc)
@@ -89,7 +103,7 @@ end
 name(s::GrammaticalSymbol) = typeof(s).name.name
 
 function expand(io::IO, arc::Arc, indentation=0)
-    print(io, "(", name(head(arc)))
+    print(io, "(", arc.start, ", ", arc.stop, " ", name(head(arc)))
     arguments = rhs(rule(arc))
     for i in eachindex(arguments)
         if length(arguments) > 1
@@ -97,7 +111,7 @@ function expand(io::IO, arc::Arc, indentation=0)
         else
             print(io, " ")
         end
-        if i > completions(arc)
+        if i > num_completions(arc)
             print(io, "(", name(arguments[i]), ")")
         else
             constituent = constituents(arc)[i]
@@ -108,7 +122,7 @@ function expand(io::IO, arc::Arc, indentation=0)
             end
         end
     end
-    print(io, " -> ", outputs(arc))
+    print(io, " -> ", output(arc))
     print(io, ")")
 end
 
@@ -179,51 +193,98 @@ struct Grammar
     # words::Dict{String, Vector{GrammaticalSymbol}}
 end
 
+function initial_chart(tokens, grammar, ::BottomUp)
+    chart = Chart(length(tokens))
+end
 
-function initial_agenda(tokens, grammar)
+
+function initial_agenda(tokens, grammar, ::BottomUp)
     agenda = Arc[]
 
     for (i, token) in enumerate(tokens)
-        push!(agenda, Arc(i - 1, i, Token() => (), [], [String(token)]))
+        push!(agenda, Arc(i - 1, i, Token() => (), [], String(token)))
     end
     agenda
 end
 
-const Agenda = Vector{Arc}
-
-function parse(tokens, grammar)
+function initial_chart(tokens, grammar, ::TopDown)
     chart = Chart(length(tokens))
-    agenda = initial_agenda(tokens, grammar)
-
-    while !isempty(agenda)
-        candidate = popfirst!(agenda)
-        update!(chart, agenda, candidate, grammar)
+    for (i, token) in enumerate(tokens)
+        push!(chart, Arc(i - 1, i, Token() => (), [], String(token)))
     end
     chart
 end
 
-function update!(chart::Chart, agenda::Agenda, candidate::Arc, grammar::Grammar)
+function initial_agenda(tokens, grammar, ::TopDown)
+    agenda = Arc[]
+    for rule in grammar.productions
+        if lhs(rule) == Clue()  # TODO get start symbol from grammar
+            push!(agenda, Arc(0, 0, rule))
+        end
+    end
+    agenda
+end
+
+
+const Agenda = Vector{Arc}
+
+function parse(tokens, grammar, strategy::AbstractStrategy)
+    @assert length(tokens) == 3 "need to generalize combinations"
+    chart = initial_chart(tokens, grammar, strategy)
+    agenda = initial_agenda(tokens, grammar, strategy)
+
+    while !isempty(agenda)
+        candidate = popfirst!(agenda)
+        @show candidate
+        update!(chart, agenda, candidate, grammar, strategy)
+        # readline(stdin) == "q" && break
+    end
+    chart
+end
+
+function update!(chart::Chart, agenda::Agenda, candidate::Arc, grammar::Grammar, strategy::AbstractStrategy)
     push!(chart, candidate)
 
     for mate in mates(chart, candidate)
-        combined = candidate + mate
-        if combined ∉ chart
-            pushfirst!(agenda, combined)
+        println("trying to combine: $mate and $candidate")
+        for combined in combinations(candidate, mate)
+            @show combined
+            if combined ∉ chart
+                pushfirst!(agenda, combined)
+            end
         end
+        println("done")
     end
+    predict!(agenda, chart, candidate, grammar, strategy)
+    # @show agenda
+end
+
+function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, ::BottomUp)
     if !isactive(candidate)
         for rule in grammar.productions
             if first(rhs(rule)) == head(candidate)
                 hypothesis = Arc(candidate.start,
                                  candidate.start,
-                                 rule,
-                                 [],
-                                 [])
+                                 rule)
                 if hypothesis ∉ chart
                     pushfirst!(agenda, hypothesis)
                 end
             end
         end
     end
-    # @show agenda
 end
+
+function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, ::TopDown)
+    if isactive(candidate)
+        for rule in grammar.productions
+            if lhs(rule) == next_needed(candidate)
+                hypothesis = Arc(candidate.stop, candidate.stop, rule)
+                @show hypothesis
+                if hypothesis ∉ chart
+                    pushfirst!(agenda, hypothesis)
+                end
+            end
+        end
+    end
+end
+

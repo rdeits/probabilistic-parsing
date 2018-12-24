@@ -22,7 +22,7 @@ function add_synonyms!(synonyms, word, list)
 end
 
 function normalize(word)
-    replace(lowercase(word), r"[^a-z0-9]" => "")
+    replace(lowercase(word), r"[^a-z0-9 ]" => "")
 end
 
 function parse_synonyms(fname)
@@ -59,10 +59,31 @@ function remove_loops!(synonyms)
     end
 end
 
+"""
+Remove synonym entries which contain the original word. For example,
+"spin" and "spin around" are listed as synonyms in the dataset, but
+crossword rules don't allow the clue to contain part of the answer
+like that.
+"""
+function remove_self_mentions!(synonyms)
+    for (word, entries) in synonyms
+        disallowed = String[]
+        for entry in entries
+            if occursin(word, entry) || occursin(entry, word)
+                push!(disallowed, entry)
+            end
+        end
+        for entry in disallowed
+            delete!(entries, entry)
+        end
+    end
+end
+
 function load_synonyms()
     synonyms = parse_synonyms(joinpath(@__DIR__, "..", "..", "corpora", "OpenOffice", "MyThes-1.0", "th_en_US_new.dat"))
     make_symmetric!(synonyms)
     remove_loops!(synonyms)
+    remove_self_mentions!(synonyms)
     synonyms
 end
 
