@@ -10,14 +10,21 @@ struct ReverseIndicator <: GrammaticalSymbol end
 struct InsertABIndicator <: GrammaticalSymbol end
 struct InsertBAIndicator <: GrammaticalSymbol end
 struct HeadIndicator <: GrammaticalSymbol end
+struct StraddleIndicator <: GrammaticalSymbol end
 
 const Rule = Pair{<:GrammaticalSymbol, <:Tuple{Vararg{GrammaticalSymbol}}}
-lhs(r::Rule) = first(r)
-rhs(r::Rule) = last(r)
+lhs(r::Pair) = first(r)
+rhs(r::Pair) = last(r)
 
 macro apply_by_reversing(Head, Args...)
     quote
         $(esc(:apply))(H::$(esc(Head)), A::Tuple{$(esc.(Args)...)}, words) = $(esc(:apply))(H, reverse(A), reverse(words))
+    end
+end
+
+macro passthrough(Head, Arg)
+    quote
+        $(esc(:apply))(H::$(esc(Head)), A::Tuple{$(esc(Arg))}, (word,)) = [word]
     end
 end
 
@@ -32,12 +39,15 @@ function cryptics_rules()
         Wordplay() => (Token(), ReverseIndicator()),
         InsertABIndicator() => (Token(),),
         HeadIndicator() => (Token(),),
+        StraddleIndicator() => (Token(),),
         Wordplay() => (InsertABIndicator(), Wordplay(), Wordplay()),
         Wordplay() => (Wordplay(), InsertABIndicator(), Wordplay()),
         Wordplay() => (Wordplay(), Wordplay(), InsertABIndicator()),
         Wordplay() => (InsertBAIndicator(), Wordplay(), Wordplay()),
         Wordplay() => (Wordplay(), InsertBAIndicator(), Wordplay()),
         Wordplay() => (Wordplay(), Wordplay(), InsertBAIndicator()),
+        Wordplay() => (StraddleIndicator(), Token(), Token()),
+        Wordplay() => (Token(), Token(), StraddleIndicator()),
         Wordplay() => (Token(),),
         Wordplay() => (Synonym(),),
         Wordplay() => (Wordplay(), Wordplay()),
@@ -50,21 +60,23 @@ function cryptics_rules()
     ]
 end
 
+@passthrough AnagramIndicator Token
+@passthrough HeadIndicator Token
+@passthrough ReverseIndicator Token
+@passthrough InsertABIndicator Token
+@passthrough InsertBAIndicator Token
+@passthrough StraddleIndicator Token
+@passthrough Wordplay Synonym
+@passthrough Wordplay Token
+@passthrough Definition Token
+
 apply(::Token, ::Tuple{Token, Token}, (a, b)) = [string(a, " ", b)]
 
-apply(::AnagramIndicator, ::Tuple{Token}, (word,)) = [word]
-apply(::HeadIndicator, ::Tuple{Token}, (word,)) = [word]
-
-function is_anagram(w1::AbstractString, w2::AbstractString)
-    sort(collect(replace(w1, " " => ""))) == sort(collect(replace(w2, " " => "")))
-end
-
 function apply(::Wordplay, ::Tuple{AnagramIndicator, Token}, (indicator, word))
-    [candidate for candidate in keys(SYNONYMS) if word != candidate && is_anagram(word, candidate)]
+    get(Vector{String}, WORDS_BY_ANAGRAM, join(sort(collect(word))))
 end
 @apply_by_reversing Wordplay Token AnagramIndicator
 
-apply(::ReverseIndicator, ::Tuple{Token}, (word,)) = [word]
 apply(::Wordplay, ::Tuple{ReverseIndicator, Token}, (indicator, word)) = [reverse(replace(word, " " => ""))]
 @apply_by_reversing Wordplay Token ReverseIndicator
 
@@ -78,8 +90,6 @@ function insertions(a, b)
 end
 # insertions(a, b) = ["insertions of $a into $b"]
 
-apply(::InsertABIndicator, ::Tuple{Token}, (word,)) = [word]
-apply(::InsertBAIndicator, ::Tuple{Token}, (word,)) = [word]
 apply(::Wordplay, ::Tuple{InsertABIndicator, Wordplay, Wordplay}, (indicator, a, b)) = insertions(a, b)
 apply(::Wordplay, ::Tuple{Wordplay, InsertABIndicator, Wordplay}, (a, indicator, b)) = insertions(a, b)
 apply(::Wordplay, ::Tuple{Wordplay, Wordplay, InsertABIndicator}, (a, b, indicator)) = insertions(a, b)
@@ -87,18 +97,33 @@ apply(::Wordplay, ::Tuple{InsertBAIndicator, Wordplay, Wordplay}, (indicator, b,
 apply(::Wordplay, ::Tuple{Wordplay, InsertBAIndicator, Wordplay}, (b, indicator, a)) = insertions(a, b)
 apply(::Wordplay, ::Tuple{Wordplay, Wordplay, InsertBAIndicator}, (b, a, indicator)) = insertions(a, b)
 
-apply(::Wordplay, ::Tuple{Synonym}, (word,)) = [word]
-apply(::Wordplay, ::Tuple{Token}, (word,)) = [word]
+# function interior_substrings(word::AbstractString, words_only=true, min_length=2, max_length=(length(word) - 2))
+#     results = String[]
+#     for i in 2:(length(word) - 1)
+#         for j in (i + min_length - 1):min(i + max_length - 1, length(word) - 1)
+#             candidate = word[i:j]
+#             if !words_only || is_word(candidate)
+#                 push!(results, word[i:j])
+#             end
+#         end
+#     end
+#     results
+# end
+
+function apply(::Wordplay, ::Tuple{StraddleIndicator, Token, Token}, (indicator, w1, w2))
+    straddling_words(w1, w2)
+end
+function apply(::Wordplay, ::Tuple{Token, Token, StraddleIndicator}, (w1, w2, indicator))
+    straddling_words(w1, w2)
+end
+
 apply(::Wordplay, ::Tuple{Wordplay, Wordplay}, (a, b)) = [string(a, b)]
 
 apply(::Wordplay, ::Tuple{HeadIndicator, Token}, (indicator, word)) = [string(word[1])]
 @apply_by_reversing Wordplay Token HeadIndicator
 
 apply(::Clue, ::Tuple{Wordplay, Definition}, (wordplay, definition)) = ["\"$wordplay\" means \"$definition\""]
-
 @apply_by_reversing Clue Definition Wordplay
-
-apply(::Definition, ::Tuple{Token}, (def,)) = [def]
 
 function apply(::Synonym, ::Tuple{Token}, (word,))
     if word in keys(SYNONYMS)
