@@ -5,54 +5,51 @@ struct TopDown <: AbstractStrategy end
 const RuleID = Pair{UInt, Vector{UInt}}
 rule_id(rule::Rule) = RuleID(objectid(lhs(rule)), collect(objectid.(rhs(rule))))
 
+
 struct Arc
     start::Int
     stop::Int
     rule::Rule
     rule_id::RuleID
-    constituents::Vector{Arc}
+    constituents::SFCVector{4, Arc}
     output::String
 
-    function Arc(start::Integer, stop::Integer, rule::Rule, rule_id::RuleID, constituents=Arc[], output="")
+    function Arc(start::Integer, stop::Integer, rule::Rule, rule_id::RuleID, constituents=Constituents(), output="")
         new(start, stop, rule, rule_id, constituents, output)
     end
 end
 
-# const Agenda = OrderedSet{Arc}
-# const Agenda = Vector{Arc}
+const Constituents = SFCVector{4, Arc}
+const Agenda = Vector{Arc}
 
-struct Agenda
-    list::Vector{Arc}
-    set::Set{Arc}
-end
+# function Base.pop!(agenda::Agenda)
+#     pop!(agenda.list)
+# end
 
-function Base.pop!(agenda::Agenda)
-    pop!(agenda.list)
-end
+# function Base.push!(agenda::Agenda, arc::Arc)
+#     if arc ∉ agenda.set
+#         push!(agenda.set, arc)
+#         push!(agenda.list, arc)
+#     end
+# end
 
-function Base.push!(agenda::Agenda, arc::Arc)
-    if arc ∉ agenda.set
-        push!(agenda.set, arc)
-        push!(agenda.list, arc)
-    end
-end
+# Base.isempty(agenda::Agenda) = isempty(agenda.list)
 
-Base.isempty(agenda::Agenda) = isempty(agenda.list)
-
-Agenda() = Agenda([], Set())
+# Agenda() = Agenda([], Set())
 
 @generated function _apply(head::GrammaticalSymbol,
                            args::Tuple{Vararg{GrammaticalSymbol, N}},
-                           constituents::Vector{Arc}) where {N}
+                           constituents::Constituents) where {N}
     quote
         apply(head, args, $(Expr(:tuple, [:(constituents[$i].output) for i in 1:N]...)))
     end
 end
 
 function apply(rule::Rule,
-                constituents::Vector{Arc})
+                constituents::Constituents)
     _apply(lhs(rule), rhs(rule), constituents)
 end
+
 
 rule(arc::Arc) = arc.rule
 rule_id(arc::Arc) = arc.rule_id
@@ -90,12 +87,6 @@ function Base.:(==)(a1::Arc, a2::Arc)
     true
 end
 
-# function _combine(a1::Arc, a2::Arc, output::String)
-#     @assert isactive(a1) && !isactive(a2)
-#     @assert next_needed(a1) == head(a2)
-#     Arc(a1.start, a2.stop, a1.rule, a1.rule_id, vcat(a1.constituents, a2), output)
-# end
-
 function _combine(start, stop, rule, rule_id, constituents, outputs)
     [Arc(start, stop, rule, rule_id, constituents, output) for output in outputs]
 end
@@ -104,8 +95,7 @@ function combined_arcs(a1::Arc, a2::Arc)::Vector{Arc}
     if !isactive(a1) && isactive(a2)
         return combined_arcs(a2, a1)
     elseif isactive(a1) && !isactive(a2)
-        new_constituents = copy(a1.constituents)
-        push!(new_constituents, a2)
+        new_constituents = push(a1.constituents, a2)
         if num_completions(a1) + 1 == num_arguments(a1)
             # then the combined arc will be complete, so we should solve it
             outputs = apply(a1.rule, new_constituents)
@@ -113,8 +103,6 @@ function combined_arcs(a1::Arc, a2::Arc)::Vector{Arc}
             outputs = [""]
         end
         return _combine(a1.start, a2.stop, a1.rule, a1.rule_id, new_constituents, outputs)
-        # result = Arc(a1.start, a2.stop, a1.rule,  new_constituents,
-        # result = Arc[_combine(a1, a2, output) for output in outputs]
     else
         error("Exactly one of a1 or a2 must be active")
     end
@@ -151,18 +139,19 @@ function expand(io::IO, arc::Arc, indentation=0)
     print(io, ")")
 end
 
+const ChartStorage = Vector{Arc}
 
 struct Chart
     num_tokens::Int
-    active::Dict{UInt, Vector{Set{Arc}}} # organized by next needed constituent then by stop
-    inactive::Dict{UInt, Vector{Set{Arc}}} # organized by head then by start
+    active::Dict{UInt, Vector{ChartStorage}} # organized by next needed constituent then by stop
+    inactive::Dict{UInt, Vector{ChartStorage}} # organized by head then by start
 end
 
 num_tokens(chart::Chart) = chart.num_tokens
 
 Chart(num_tokens) = Chart(num_tokens,
-                          Dict{UInt, Vector{Set{Arc}}}(),
-                          Dict{UInt, Vector{Set{Arc}}}())
+                          Dict{UInt, Vector{ChartStorage}}(),
+                          Dict{UInt, Vector{ChartStorage}}())
 
 function storage(chart::Chart, active::Bool, symbol::UInt, node::Integer)
     if active
@@ -171,7 +160,7 @@ function storage(chart::Chart, active::Bool, symbol::UInt, node::Integer)
         d = chart.inactive
     end
     v = get!(d, symbol) do
-        [Set{Arc}() for _ in 0:num_tokens(chart)]
+        [ChartStorage() for _ in 0:num_tokens(chart)]
     end
     v[node + 1]
 end
@@ -230,8 +219,10 @@ end
 function initial_agenda(tokens, grammar, ::BottomUp)
     agenda = Agenda()
 
+    rule = Token() => ()
+    id = rule_id(rule)
     for (i, token) in enumerate(tokens)
-        push!(agenda, Arc(i - 1, i, Token() => (), [], String(token)))
+        push!(agenda, Arc(i - 1, i, rule, id, Constituents(), String(token)))
     end
     agenda
 end
@@ -241,7 +232,7 @@ function initial_chart(tokens, grammar, ::TopDown)
     rule = Token() => ()
     id = rule_id(rule)
     for (i, token) in enumerate(tokens)
-        push!(chart, Arc(i - 1, i, rule, id, [], String(token)))
+        push!(chart, Arc(i - 1, i, rule, id, Constituents(), String(token)))
     end
     chart
 end
@@ -259,53 +250,93 @@ end
 function parse(tokens, grammar, strategy::AbstractStrategy)
     chart = initial_chart(tokens, grammar, strategy)
     agenda = initial_agenda(tokens, grammar, strategy)
+    predictions = Set{Tuple{UInt, Int}}()
 
     while !isempty(agenda)
         candidate = pop!(agenda)
         # @show candidate
-        update!(chart, agenda, candidate, grammar, strategy)
+        update!(chart, agenda, candidate, grammar, predictions, strategy)
         # readline(stdin) == "q" && break
     end
     chart
 end
 
-function update!(chart::Chart, agenda::Agenda, candidate::Arc, grammar::Grammar, strategy::AbstractStrategy)
+function update!(chart::Chart, agenda::Agenda, candidate::Arc, grammar::Grammar, predictions::Set{Tuple{UInt, Int}}, strategy::AbstractStrategy)
+    # if candidate in chart
+    #     @show candidate
+    #     error("duplicate candidate")
+    # end
+    # @show candidate
     push!(chart, candidate)
 
     for mate in mates(chart, candidate)
         for combined in combined_arcs(candidate, mate)
             # @show combined
-            if combined ∉ chart
+            # if combined in chart
+            #     @show combined
+            #     error("duplicate combined")
+            # end
+            # if combined in agenda
+            #     @show combined
+            #     error("duplicate combined")
+            # end
+            # if combined ∉ chart
                 push!(agenda, combined)
-            end
+            # end
         end
     end
-    predict!(agenda, chart, candidate, grammar, strategy)
+    predict!(agenda, chart, candidate, grammar, predictions, strategy)
     # @show agenda
 end
 
-function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, ::BottomUp)
+function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, predictions::Set{Tuple{UInt, Int}}, ::BottomUp)
     if !isactive(candidate)
-        for (rule, rule_id) in grammar.productions
-            if first(rhs(rule_id)) == head(candidate)
-                hypothesis = Arc(candidate.start,
-                                 candidate.start,
-                                 rule,
-                                 rule_id)
-                if hypothesis ∉ chart
-                    push!(agenda, hypothesis)
+        key = (head(candidate), candidate.start)
+        if key ∉ predictions
+            push!(predictions, key)
+            for (rule, rule_id) in grammar.productions
+                if first(rhs(rule_id)) == head(candidate)
+                    hypothesis = Arc(candidate.start,
+                                     candidate.start,
+                                     rule,
+                                     rule_id)
+                    # if hypothesis in chart
+                    #     @show hypothesis
+                    #     error("duplicate hypothesis")
+                    # end
+                    # if hypothesis in agenda
+                    #     @show hypothesis
+                    #     error("duplicate hypothesis")
+                    # end
+                    # if hypothesis ∉ chart
+                        push!(agenda, hypothesis)
+                    # end
                 end
             end
         end
     end
 end
 
-function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, ::TopDown)
+function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, predictions::Set{Tuple{UInt, Int}}, ::TopDown)
     if isactive(candidate)
-        for (rule, rule_id) in grammar.productions
-            if lhs(rule_id) == next_needed(candidate)
-                hypothesis = Arc(candidate.stop, candidate.stop, rule, rule_id)
-                push!(agenda, hypothesis)
+        key = (next_needed(candidate), candidate.stop)
+        if key ∉ predictions
+            push!(predictions, key)
+            for (rule, rule_id) in grammar.productions
+                if lhs(rule_id) == next_needed(candidate)
+                    hypothesis = Arc(candidate.stop, candidate.stop, rule, rule_id)
+                    # if hypothesis in chart
+                    #     @show hypothesis
+                    #     error("duplicate hypothesis")
+                    # end
+                    # if hypothesis in agenda
+                    #     @show hypothesis
+                    #     error("duplicate hypothesis")
+                    # end
+                    # if hypothesis ∉ chart
+                        push!(agenda, hypothesis)
+                    # end
+                end
             end
         end
     end

@@ -9,6 +9,9 @@ export Chart, parse, Grammar, expand, complete_parses
 include("Synonyms.jl")
 using .Synonyms
 
+include("FixedCapacityVectors.jl")
+using .FixedCapacityVectors
+
 include("words.jl")
 include("grammar.jl")
 include("parsing.jl")

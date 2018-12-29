@@ -24,8 +24,12 @@ using Cryptics
 using ProfileView
 using Profile
 Profile.clear()
-@profile Cryptics.solve("spin broken shingle")
-@time Cryptics.solve("spin broken shingle")
+# clue = "initially babies are naked"
+clue = "spin broken shingle"
+# clue = "healthy competent boy nearly died"
+@profile Cryptics.solve(clue, Cryptics.TopDown())
+@time solutions = Cryptics.solve(clue, Cryptics.TopDown())
+@show first(solutions)
 Profile.clear()
-@profile Cryptics.solve("spin broken shingle")
+@profile Cryptics.solve(clue, Cryptics.TopDown())
 ProfileView.view()
