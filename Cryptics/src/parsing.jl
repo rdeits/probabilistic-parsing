@@ -5,37 +5,45 @@ struct TopDown <: AbstractStrategy end
 const RuleID = Pair{UInt, Vector{UInt}}
 rule_id(rule::Rule) = RuleID(objectid(lhs(rule)), collect(objectid.(rhs(rule))))
 
+abstract type AbstractArc end
 
-struct Arc
+struct PassiveArc <: AbstractArc
     start::Int
     stop::Int
     rule::Rule
     rule_id::RuleID
-    constituents::SFCVector{4, Arc}
+    constituents::Vector{PassiveArc}
     output::String
-
-    function Arc(start::Integer, stop::Integer, rule::Rule, rule_id::RuleID, constituents=Constituents(), output="")
-        new(start, stop, rule, rule_id, constituents, output)
-    end
 end
 
-const Constituents = SFCVector{4, Arc}
-const Agenda = Vector{Arc}
+struct ActiveArc <: AbstractArc
+    start::Int
+    stop::Int
+    rule::Rule
+    rule_id::RuleID
+    context::Context
+    constituents::Vector{PassiveArc}
+end
 
-# function Base.pop!(agenda::Agenda)
-#     pop!(agenda.list)
-# end
+rule(arc::AbstractArc) = arc.rule
+rule_id(arc::AbstractArc) = arc.rule_id
+head(arc::AbstractArc) = lhs(rule_id(arc))
+constituents(arc::AbstractArc) = arc.constituents
 
-# function Base.push!(agenda::Agenda, arc::Arc)
-#     if arc ∉ agenda.set
-#         push!(agenda.set, arc)
-#         push!(agenda.list, arc)
-#     end
-# end
+context(arc::ActiveArc) = arc.context
+num_arguments(arc::AbstractArc) = length(rhs(rule_id(arc)))
+num_completions(arc::AbstractArc) = length(constituents(arc))
 
-# Base.isempty(agenda::Agenda) = isempty(agenda.list)
+is_complete(arc::ActiveArc) = num_completions(arc) == num_arguments(arc)
+function next_needed(arc::ActiveArc)
+    @assert !is_complete(arc)
+    rhs(rule_id(arc))[num_completions(arc) + 1]
+end
 
-# Agenda() = Agenda([], Set())
+output(arc::PassiveArc) = arc.output
+
+const Constituents = Vector{PassiveArc}
+const Agenda = Vector{ActiveArc}
 
 @generated function _apply(head::GrammaticalSymbol,
                            args::Tuple{Vararg{GrammaticalSymbol, N}},
@@ -51,71 +59,52 @@ function apply(rule::Rule,
 end
 
 
-rule(arc::Arc) = arc.rule
-rule_id(arc::Arc) = arc.rule_id
-head(arc::Arc) = lhs(rule_id(arc))
-num_arguments(arc::Arc) = length(rhs(rule_id(arc)))
-num_completions(arc::Arc) = length(arc.constituents)
-isactive(arc::Arc) = num_completions(arc) < num_arguments(arc)
-constituents(arc::Arc) = arc.constituents
-output(arc::Arc) = arc.output
-function next_needed(arc::Arc)
-    @assert isactive(arc)
-    rhs(rule_id(arc))[num_completions(arc) + 1]
+function solve(arc::ActiveArc)
+    @assert is_complete(arc)
+    outputs = apply(rule(arc), constituents(arc))
+    # @show outputs
+    filter!(is_match(context(arc)), outputs)
+    # @show outputs
+    [PassiveArc(arc.start, arc.stop, rule(arc), rule_id(arc), constituents(arc), output) for output in outputs]
 end
 
-function Base.hash(arc::Arc, h::UInt)
+function Base.hash(arc::PassiveArc, h::UInt)
     h = hash(arc.start, h)
     h = hash(arc.stop, h)
-    h = hash(arc.rule_id, h)
-    for c in arc.constituents
+    h = hash(rule_id(arc), h)
+    for c in constituents(arc)
         h = hash(objectid(c), h)
     end
-    h = hash(arc.output, h)
+    h = hash(output(arc), h)
     h
 end
 
-function Base.:(==)(a1::Arc, a2::Arc)
+function Base.:(==)(a1::PassiveArc, a2::PassiveArc)
     a1.start == a2.start || return false
     a1.stop == a2.stop || return false
-    a1.rule_id == a2.rule_id || return false
-    length(a1.constituents) == length(a2.constituents) || return false
-    for i in eachindex(a1.constituents)
+    rule_id(a1) == rule_id(a2) || return false
+    length(constituents(a1)) == length(constituents(a2)) || return false
+    for i in eachindex(constituents(a1))
         a1.constituents[i] === a2.constituents[i] || return false
     end
-    a1.output == a2.output || return false
+    output(a1) == output(a2) || return false
     true
 end
 
-function _combine(start, stop, rule, rule_id, constituents, outputs)
-    [Arc(start, stop, rule, rule_id, constituents, output) for output in outputs]
+function combine(a1::ActiveArc, a2::PassiveArc)
+    new_constituents = push(constituents(a1), a2)
+    ActiveArc(a1.start, a2.stop, rule(a1), rule_id(a1), context(a1), new_constituents)
 end
 
-function combined_arcs(a1::Arc, a2::Arc)::Vector{Arc}
-    if !isactive(a1) && isactive(a2)
-        return combined_arcs(a2, a1)
-    elseif isactive(a1) && !isactive(a2)
-        new_constituents = push(a1.constituents, a2)
-        if num_completions(a1) + 1 == num_arguments(a1)
-            # then the combined arc will be complete, so we should solve it
-            outputs = apply(a1.rule, new_constituents)
-        else
-            outputs = [""]
-        end
-        return _combine(a1.start, a2.stop, a1.rule, a1.rule_id, new_constituents, outputs)
-    else
-        error("Exactly one of a1 or a2 must be active")
-    end
-    return result
-end
+combine(a1::PassiveArc, a2::ActiveArc) = combine(a2, a1)
 
-function Base.show(io::IO, arc::Arc)
+function Base.show(io::IO, arc::AbstractArc)
     expand(io, arc, 0)
 end
 
 name(s::GrammaticalSymbol) = typeof(s).name.name
 
-function expand(io::IO, arc::Arc, indentation=0)
+function expand(io::IO, arc::AbstractArc, indentation=0)
     print(io, "(", arc.start, ", ", arc.stop, " ", name(lhs(rule(arc))))
     arguments = rhs(rule(arc))
     for i in eachindex(arguments)
@@ -135,71 +124,54 @@ function expand(io::IO, arc::Arc, indentation=0)
             end
         end
     end
-    print(io, " -> ", output(arc))
+    if isa(arc, ActiveArc)
+        print(io, " | ", context(arc))
+    else
+        print(io, " -> ", output(arc))
+    end
     print(io, ")")
 end
 
-const ChartStorage = Vector{Arc}
-
 struct Chart
     num_tokens::Int
-    active::Dict{UInt, Vector{ChartStorage}} # organized by next needed constituent then by stop
-    inactive::Dict{UInt, Vector{ChartStorage}} # organized by head then by start
+    active::Dict{UInt, Vector{Vector{ActiveArc}}} # organized by next needed constituent then by stop
+    passive::Dict{UInt, Vector{Set{PassiveArc}}} # organized by head then by start
 end
 
 num_tokens(chart::Chart) = chart.num_tokens
 
 Chart(num_tokens) = Chart(num_tokens,
-                          Dict{UInt, Vector{ChartStorage}}(),
-                          Dict{UInt, Vector{ChartStorage}}())
+                          Dict{UInt, Vector{Vector{ActiveArc}}}(),
+                          Dict{UInt, Vector{Set{PassiveArc}}}())
 
-function storage(chart::Chart, active::Bool, symbol::UInt, node::Integer)
-    if active
-        d = chart.active
-    else
-        d = chart.inactive
+function _active_storage(chart::Chart, next_needed::UInt, stop::Integer)
+    v = get!(chart.active, next_needed) do
+        [Vector{ActiveArc}() for _ in 0:num_tokens(chart)]
     end
-    v = get!(d, symbol) do
-        [ChartStorage() for _ in 0:num_tokens(chart)]
-    end
-    v[node + 1]
+    v[stop + 1]
 end
 
-
-function storage(chart::Chart, arc::Arc)
-    if isactive(arc)
-        i = arc.stop
-        s = next_needed(arc)
-        return storage(chart, true, s, i)
-    else
-        i = arc.start
-        s = head(arc)
-        return storage(chart, false, s, i)
+function _passive_storage(chart::Chart, head::UInt, start::Integer)
+    v = get!(chart.passive, head) do
+        [Set{PassiveArc}() for _ in 0:num_tokens(chart)]
     end
+    v[start + 1]
 end
 
-function mates(chart::Chart, candidate::Arc)
-    if isactive(candidate)
-        i = candidate.stop
-        s = next_needed(candidate)
-        return storage(chart, false, s, i)
-    else
-        i = candidate.start
-        s = head(candidate)
-        return storage(chart, true, s, i)
-    end
-end
+storage(chart::Chart, arc::ActiveArc) = _active_storage(chart, next_needed(arc), arc.stop)
+storage(chart::Chart, arc::PassiveArc) = _passive_storage(chart, head(arc), arc.start)
 
-function Base.push!(chart::Chart, arc::Arc)
+mates(chart::Chart, candidate::ActiveArc) = _passive_storage(chart, next_needed(candidate), candidate.stop)
+mates(chart::Chart, candidate::PassiveArc) = _active_storage(chart, head(candidate), candidate.start)
+
+function Base.push!(chart::Chart, arc::AbstractArc)
     push!(storage(chart, arc), arc)
 end
 
-function Base.in(arc::Arc, chart::Chart)
-    arc ∈ storage(chart, arc)
-end
+Base.in(arc::AbstractArc, chart::Chart) = arc ∈ storage(chart, arc)
 
 # TODO: generalize start token
-complete_parses(chart::Chart) = filter(storage(chart, false, objectid(Clue()), 0)) do arc
+complete_parses(chart::Chart) = filter(_passive_storage(chart, objectid(Clue()), 0)) do arc
     arc.stop == num_tokens(chart)
 end
 
@@ -211,138 +183,146 @@ function Grammar(rules::AbstractVector{<:Rule})
     Grammar(Pair{Rule, RuleID}[rule => rule_id(rule) for rule in rules])
 end
 
-function initial_chart(tokens, grammar, ::BottomUp)
+# function initial_chart(tokens, grammar, ::BottomUp)
+#     chart = Chart(length(tokens))
+# end
+
+
+# function initial_agenda(tokens, grammar, ::BottomUp)
+#     agenda = Agenda()
+
+#     rule = Token() => ()
+#     id = rule_id(rule)
+#     for (i, token) in enumerate(tokens)
+#         push!(agenda, Arc(i - 1, i, rule, id, Constituents(), String(token)))
+#     end
+#     agenda
+# end
+
+function initial_chart(tokens, grammar, context::Context, ::TopDown)
     chart = Chart(length(tokens))
-end
-
-
-function initial_agenda(tokens, grammar, ::BottomUp)
-    agenda = Agenda()
-
     rule = Token() => ()
     id = rule_id(rule)
     for (i, token) in enumerate(tokens)
-        push!(agenda, Arc(i - 1, i, rule, id, Constituents(), String(token)))
-    end
-    agenda
-end
-
-function initial_chart(tokens, grammar, ::TopDown)
-    chart = Chart(length(tokens))
-    rule = Token() => ()
-    id = rule_id(rule)
-    for (i, token) in enumerate(tokens)
-        push!(chart, Arc(i - 1, i, rule, id, Constituents(), String(token)))
+        push!(chart, PassiveArc(i - 1, i, rule, id, Constituents(), String(token)))
     end
     chart
 end
 
-function initial_agenda(tokens, grammar, ::TopDown)
+function initial_agenda(tokens, grammar, context::Context, ::TopDown)
     agenda = Agenda()
     for (rule, rule_id) in grammar.productions
         if lhs(rule) == Clue()  # TODO get start symbol from grammar
-            push!(agenda, Arc(0, 0, rule, rule_id))
+            push!(agenda, ActiveArc(0, 0, rule, rule_id, context, Constituents()))
         end
     end
     agenda
 end
 
-function parse(tokens, grammar, strategy::AbstractStrategy)
-    chart = initial_chart(tokens, grammar, strategy)
-    agenda = initial_agenda(tokens, grammar, strategy)
-    predictions = Set{Tuple{UInt, Int}}()
+struct Predictions
+    predictions::Dict{Tuple{UInt, Int}, Vector{Context}}
+end
+
+Predictions() = Predictions(Dict{Tuple{UInt, Int}, Vector{Context}}())
+
+"""
+Returns `true` if the key was added, `false` otherwise.
+"""
+function maybe_push!(p::Predictions, (symbol, index, context)::Tuple{UInt, Int, Context})
+    v = get!(() -> Vector{Context}(), p.predictions, (symbol, index))
+    for other_context in v
+        if context == other_context || context ⊆ other_context
+            return false
+        end
+    end
+    # TODO: if context >= other_context, then replace the other context rather than
+    # appending.
+    push!(v, context)
+    return true
+end
+
+function maybe_push!(chart::Chart, arc::ActiveArc)
+    # We expect to avoid duplicate active arcs at the prediction stage, so
+    # this should always return true
+    @assert arc ∉ chart
+    push!(chart, arc)
+    return true
+end
+
+function maybe_push!(chart::Chart, arc::PassiveArc)
+    if arc ∈ chart
+        return false
+    else
+        push!(chart, arc)
+        return true
+    end
+end
+
+function parse(tokens, grammar, context::Context, strategy::AbstractStrategy)
+    chart = initial_chart(tokens, grammar, context, strategy)
+    agenda = initial_agenda(tokens, grammar, context, strategy)
+    predictions = Predictions()
 
     while !isempty(agenda)
         candidate = pop!(agenda)
         # @show candidate
-        update!(chart, agenda, candidate, grammar, predictions, strategy)
-        # readline(stdin) == "q" && break
+        if is_complete(candidate)
+            # println("solving: ", candidate)
+            for output in solve(candidate)
+                # println("got output: ", output)
+                update!(chart, agenda, output, grammar, predictions, strategy)
+            end
+        else
+            update!(chart, agenda, candidate, grammar, predictions, strategy)
+        end
     end
     chart
 end
 
-function update!(chart::Chart, agenda::Agenda, candidate::Arc, grammar::Grammar, predictions::Set{Tuple{UInt, Int}}, strategy::AbstractStrategy)
-    # if candidate in chart
-    #     @show candidate
-    #     error("duplicate candidate")
-    # end
-    # @show candidate
-    push!(chart, candidate)
-
+function update!(chart::Chart, agenda::Agenda, candidate::AbstractArc, grammar::Grammar, predictions::Predictions, strategy::AbstractStrategy)
+    is_new = maybe_push!(chart, candidate)
+    if !is_new
+        return
+    end
     for mate in mates(chart, candidate)
-        for combined in combined_arcs(candidate, mate)
-            # @show combined
-            # if combined in chart
-            #     @show combined
-            #     error("duplicate combined")
-            # end
-            # if combined in agenda
-            #     @show combined
-            #     error("duplicate combined")
-            # end
-            # if combined ∉ chart
-                push!(agenda, combined)
-            # end
-        end
+        # @show mate
+        push!(agenda, combine(candidate, mate))
     end
     predict!(agenda, chart, candidate, grammar, predictions, strategy)
     # @show agenda
 end
 
-function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, predictions::Set{Tuple{UInt, Int}}, ::BottomUp)
-    if !isactive(candidate)
-        key = (head(candidate), candidate.start)
-        if key ∉ predictions
-            push!(predictions, key)
-            for (rule, rule_id) in grammar.productions
-                if first(rhs(rule_id)) == head(candidate)
-                    hypothesis = Arc(candidate.start,
-                                     candidate.start,
-                                     rule,
-                                     rule_id)
-                    # if hypothesis in chart
-                    #     @show hypothesis
-                    #     error("duplicate hypothesis")
-                    # end
-                    # if hypothesis in agenda
-                    #     @show hypothesis
-                    #     error("duplicate hypothesis")
-                    # end
-                    # if hypothesis ∉ chart
-                        push!(agenda, hypothesis)
-                    # end
-                end
+function predict!(agenda::Agenda, chart::Chart, candidate::ActiveArc, grammar::Grammar, predictions::Predictions, ::TopDown)
+    new_context::Context = propagate(context(candidate), rule(candidate), output.(constituents(candidate)))
+    if isempty(new_context)
+        return
+    end
+    key = (next_needed(candidate), candidate.stop, new_context)
+    is_new = maybe_push!(predictions, key)
+    # show_key = (rhs(rule(candidate))[num_completions(candidate) + 1], candidate.stop, new_context)
+    # @show show_key is_new
+    if is_new
+        for (rule, rule_id) in grammar.productions
+            if candidate.stop + length(rhs(rule_id)) > num_tokens(chart)
+                # There won't be enough tokens in the input to actually satisfy
+                # this rule, so don't bother making a hypothesis with it.
+                continue
+            end
+            if lhs(rule_id) == next_needed(candidate)
+                hypothesis = ActiveArc(candidate.stop, candidate.stop, rule, rule_id,
+                                       new_context, Constituents())
+                # @show hypothesis
+                push!(agenda, hypothesis)
             end
         end
     end
 end
 
-function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, predictions::Set{Tuple{UInt, Int}}, ::TopDown)
-    if isactive(candidate)
-        key = (next_needed(candidate), candidate.stop)
-        if key ∉ predictions
-            push!(predictions, key)
-            for (rule, rule_id) in grammar.productions
-                if lhs(rule_id) == next_needed(candidate)
-                    hypothesis = Arc(candidate.stop, candidate.stop, rule, rule_id)
-                    # if hypothesis in chart
-                    #     @show hypothesis
-                    #     error("duplicate hypothesis")
-                    # end
-                    # if hypothesis in agenda
-                    #     @show hypothesis
-                    #     error("duplicate hypothesis")
-                    # end
-                    # if hypothesis ∉ chart
-                        push!(agenda, hypothesis)
-                    # end
-                end
-            end
-        end
-    end
+function predict!(agenda::Agenda, chart::Chart, candidate::PassiveArc, grammar::Grammar, predictions::Predictions, ::TopDown)
+    # no predictions generated for passive arcs when using a top-down strategy
 end
 
-function solution_quality(arc::Arc)
+function solution_quality(arc::PassiveArc)
     @assert lhs(rule(arc)) === Clue() && length(constituents(arc)) == 2
     w1, w2 = output.(constituents(arc))
     if w2 in keys(SYNONYMS) && w1 in SYNONYMS[w2]

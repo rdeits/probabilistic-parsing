@@ -25,4 +25,10 @@ end
     end
 end
 
+function push(v::AbstractVector{T}, x::T) where {T}
+    result = copy(v)
+    push!(result, x)
+    result
+end
+
 end
