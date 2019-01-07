@@ -39,8 +39,10 @@ function cryptics_rules()
         ReverseIndicator() => (Phrase(),),
         Wordplay() => (ReverseIndicator(), Phrase()),
         Wordplay() => (Phrase(), ReverseIndicator()),
+        HeadIndicator() => (Phrase(),),
+        Wordplay() => (HeadIndicator(), Token()),
+        Wordplay() => (Token(), HeadIndicator()),
         # InsertABIndicator() => (Phrase(),),
-        # HeadIndicator() => (Phrase(),),
         # StraddleIndicator() => (Phrase(),),
         # Wordplay() => (InsertABIndicator(), Wordplay(), Wordplay()),
         # Wordplay() => (Wordplay(), InsertABIndicator(), Wordplay()),
@@ -51,11 +53,9 @@ function cryptics_rules()
         # Wordplay() => (StraddleIndicator(), Token(), Token()),
         # Wordplay() => (Token(), Token(), StraddleIndicator()),
         Wordplay() => (Token(),),
-        # Wordplay() => (Synonym(),),
+        Wordplay() => (Synonym(),),
         Wordplay() => (Wordplay(), Wordplay()),
-        # Wordplay() => (HeadIndicator(), Token()),
-        # Wordplay() => (Token(), HeadIndicator()),
-        # Synonym() => (Phrase(),),
+        Synonym() => (Phrase(),),
         Definition() => (Phrase(),),
         Clue() => (Wordplay(), Definition()),
         Clue() => (Definition(), Wordplay()),
@@ -136,6 +136,21 @@ propagate(context::Context, ::Wordplay, ::Tuple{ReverseIndicator, Phrase}, input
 @apply_by_reversing Wordplay Phrase ReverseIndicator
 propagate(context::Context, ::Wordplay, ::Tuple{Phrase, ReverseIndicator}, inputs) = propagate_to_argument(context, 1, inputs)
 
+apply(::Wordplay, ::Tuple{HeadIndicator, Token}, (indicator, word)) = [string(word[1])]
+propagate(context::Context, ::Wordplay, ::Tuple{HeadIndicator, Token}, inputs) = propagate_to_argument(context, 2, inputs)
+@apply_by_reversing Wordplay Token HeadIndicator
+propagate(context::Context, ::Wordplay, ::Tuple{Token, HeadIndicator}, inputs) = propagate_to_argument(context, 1, inputs)
+
+function apply(::Synonym, ::Tuple{Phrase}, (word,))
+    if word in keys(SYNONYMS)
+        collect(SYNONYMS[word])
+    else
+        String[]
+    end
+end
+propagate(context::Context, ::Synonym, ::Tuple{Phrase}, inputs) = unconstrained_context()
+
+
 # """
 # All insertions of a into b
 # """
@@ -174,16 +189,6 @@ propagate(context::Context, ::Wordplay, ::Tuple{Phrase, ReverseIndicator}, input
 # end
 
 
-# apply(::Wordplay, ::Tuple{HeadIndicator, Token}, (indicator, word)) = [string(word[1])]
-# @apply_by_reversing Wordplay Token HeadIndicator
-
-# function apply(::Synonym, ::Tuple{Token}, (word,))
-#     if word in keys(SYNONYMS)
-#         collect(SYNONYMS[word])
-#     else
-#         String[]
-#     end
-# end
 
         # AnagramIndicator() => (Phrase(),),
         # Wordplay() => (AnagramIndicator(), Phrase()),

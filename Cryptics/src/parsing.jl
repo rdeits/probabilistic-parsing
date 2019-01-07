@@ -230,13 +230,23 @@ Returns `true` if the key was added, `false` otherwise.
 """
 function maybe_push!(p::Predictions, (symbol, index, context)::Tuple{UInt, Int, Context})
     v = get!(() -> Vector{Context}(), p.predictions, (symbol, index))
-    for other_context in v
+    for i in eachindex(v)
+        other_context = v[i]
         if context == other_context || context ⊆ other_context
+            # This context is a subset of a context we've already added,
+            # so there is no reason to make hypotheses about it
             return false
+        elseif other_context ⊆ context
+            # This context is a superset of a context we've already added,
+            # so it is useful to make hypotheses about it. Furthermore,
+            # we can completely replace the old context in our prediction
+            # record with the new, more general, context.
+            v[i] = context
+            return true
         end
     end
-    # TODO: if context >= other_context, then replace the other context rather than
-    # appending.
+    # This context is totally new, so it's useful for generating hypotheses
+    # and we should add it to the record of predictions.
     push!(v, context)
     return true
 end
