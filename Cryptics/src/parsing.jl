@@ -60,6 +60,7 @@ end
 
 
 function solve(arc::ActiveArc)
+    # @show arc
     @assert is_complete(arc)
     outputs = apply(rule(arc), constituents(arc))
     # @show outputs
@@ -183,22 +184,6 @@ function Grammar(rules::AbstractVector{<:Rule})
     Grammar(Pair{Rule, RuleID}[rule => rule_id(rule) for rule in rules])
 end
 
-# function initial_chart(tokens, grammar, ::BottomUp)
-#     chart = Chart(length(tokens))
-# end
-
-
-# function initial_agenda(tokens, grammar, ::BottomUp)
-#     agenda = Agenda()
-
-#     rule = Token() => ()
-#     id = rule_id(rule)
-#     for (i, token) in enumerate(tokens)
-#         push!(agenda, Arc(i - 1, i, rule, id, Constituents(), String(token)))
-#     end
-#     agenda
-# end
-
 function initial_chart(tokens, grammar, context::Context, ::TopDown)
     chart = Chart(length(tokens))
     rule = Token() => ()
@@ -254,7 +239,7 @@ end
 function maybe_push!(chart::Chart, arc::ActiveArc)
     # We expect to avoid duplicate active arcs at the prediction stage, so
     # this should always return true
-    @assert arc ∉ chart
+    # @assert arc ∉ chart
     push!(chart, arc)
     return true
 end
@@ -289,6 +274,12 @@ function parse(tokens, grammar, context::Context, strategy::AbstractStrategy)
     chart
 end
 
+function matches_context(active::ActiveArc, passive::PassiveArc)
+   is_match(propagate(active.context, active.rule, active.constituents), output(passive))
+end
+
+matches_context(p::PassiveArc, a::ActiveArc) = matches_context(a, p)
+
 function update!(chart::Chart, agenda::Agenda, candidate::AbstractArc, grammar::Grammar, predictions::Predictions, strategy::AbstractStrategy)
     is_new = maybe_push!(chart, candidate)
     if !is_new
@@ -296,14 +287,16 @@ function update!(chart::Chart, agenda::Agenda, candidate::AbstractArc, grammar::
     end
     for mate in mates(chart, candidate)
         # @show mate
-        push!(agenda, combine(candidate, mate))
+        if matches_context(candidate, mate)
+            push!(agenda, combine(candidate, mate))
+        end
     end
     predict!(agenda, chart, candidate, grammar, predictions, strategy)
     # @show agenda
 end
 
 function predict!(agenda::Agenda, chart::Chart, candidate::ActiveArc, grammar::Grammar, predictions::Predictions, ::TopDown)
-    new_context::Context = propagate(context(candidate), rule(candidate), output.(constituents(candidate)))
+    new_context::Context = propagate(context(candidate), rule(candidate), constituents(candidate))
     if isempty(new_context)
         return
     end

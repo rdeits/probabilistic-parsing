@@ -58,8 +58,10 @@ struct Context
     constraint::Union{Constraint, Nothing}
 end
 
+num_letters(word::AbstractString) = count(!isequal(' '), word)
+
 function is_match(context::Context, word::AbstractString)
-    (context.min_length <= length(replace(word, " " => "")) <= context.max_length) || return false
+    (context.min_length <= num_letters(word) <= context.max_length) || return false
     word
     if context.constraint === nothing
         return true
@@ -97,4 +99,4 @@ end
 
 ⊆(c1::Context, c2::Context) = is_subset(c1, c2)
 
-Base.isempty(c::Context) = c.max_length == 0 || c.min_length > c.max_length
+Base.isempty(c::Context) = c.max_length < 1 || c.min_length > c.max_length
