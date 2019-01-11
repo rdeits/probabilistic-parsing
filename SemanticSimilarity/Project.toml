@@ -1,0 +1,8 @@
+name = "SemanticSimilarity"
+uuid = "7790f7f6-1469-11e9-1140-638424164169"
+authors = ["Robin Deits <robin.deits@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+WordNet = "a945a9ba-879e-550e-aa45-2a4d52798e91"
